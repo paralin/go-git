@@ -1056,7 +1056,7 @@ func (r *Repository) clone(ctx context.Context, o *CloneOptions) error {
 		}
 
 		if o.RecurseSubmodules != NoRecurseSubmodules {
-			if err := w.updateSubmodules(ctx, &SubmoduleUpdateOptions{
+			subOpts := &SubmoduleUpdateOptions{
 				RecurseSubmodules: o.RecurseSubmodules,
 				Depth: func() int {
 					if o.ShallowSubmodules {
@@ -1065,7 +1065,13 @@ func (r *Repository) clone(ctx context.Context, o *CloneOptions) error {
 					return 0
 				}(),
 				Auth: o.Auth,
-			}); err != nil {
+			}
+
+			if o.SubmoduleURLRewriter != nil {
+				subOpts.URLRewriter = o.SubmoduleURLRewriter
+			}
+
+			if err := w.updateSubmodules(ctx, subOpts); err != nil {
 				return err
 			}
 		}
@@ -1096,6 +1102,31 @@ func (r *Repository) clone(ctx context.Context, o *CloneOptions) error {
 	}
 
 	return nil
+}
+
+// LocalSubmoduleRewriter returns a URLRewriter that maps submodule names to
+// .git/modules/<name>/ paths under the given local repository path. If the
+// module directory does not exist, the original URL is returned unchanged so
+// the fetch falls back to the remote.
+//
+// This is intended for use with CloneOptions.SubmoduleURLRewriter or
+// SubmoduleUpdateOptions.URLRewriter when cloning from a local repository
+// whose submodules should be fetched from the source's .git/modules/
+// directory rather than from the remote URLs in .gitmodules.
+func LocalSubmoduleRewriter(repoPath string) func(string, string) string {
+	return func(name, originalURL string) string {
+		// Check for a non-bare repo: <repoPath>/.git/modules/<name>
+		candidate := filepath.Join(repoPath, GitDirName, "modules", filepath.FromSlash(name))
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return candidate
+		}
+		// Check for a bare repo: <repoPath>/modules/<name>
+		candidate = filepath.Join(repoPath, "modules", filepath.FromSlash(name))
+		if info, err := os.Stat(candidate); err == nil && info.IsDir() {
+			return candidate
+		}
+		return originalURL
+	}
 }
 
 const (

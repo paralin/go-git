@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"path"
 
 	"github.com/go-git/go-billy/v6"
@@ -192,6 +193,10 @@ func (s *Submodule) update(ctx context.Context, o *SubmoduleUpdateOptions, force
 		}
 	}
 
+	if o.URLRewriter != nil {
+		s.c.URL = o.URLRewriter(s.c.Name, s.c.URL)
+	}
+
 	idx, err := s.w.r.Storer.Index()
 	if err != nil {
 		return err
@@ -238,6 +243,15 @@ func (s *Submodule) doRecursiveUpdate(ctx context.Context, r *Repository, o *Sub
 	*opts = *o
 
 	opts.RecurseSubmodules--
+
+	// When the parent submodule was cloned from a local modules path, derive a
+	// new rewriter for nested submodules using the parent module's local path.
+	if o.URLRewriter != nil && s.c.URL != "" {
+		if info, err := os.Stat(s.c.URL); err == nil && info.IsDir() {
+			opts.URLRewriter = LocalSubmoduleRewriter(s.c.URL)
+		}
+	}
+
 	return l.UpdateContext(ctx, opts)
 }
 
